@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FruitiePy - AI Fruit Intelligence</title>
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #e38d2b, #99e025);
+            text-align: center;
+            color: white;
+        }
+
+        h1 {
+            font-size: 50px;
+            margin: 5px 0 0 0;
+            background: linear-gradient(90deg,  #e23404);
+            -webkit-background-clip: text;
+           
+        }
+
+        .subtitle {
+            font-size: 16px;
+            margin: 5px 0 10px 0;
+            color: #eee;
+        }
+
+        .main-container {
+            display: flex;
+            justify-content: center;
+            align-items: stretch;   /* IMPORTANT for same height */
+            gap: 15px;
+            padding: 5px;
+            height: calc(100vh - 100px);
+        }
+
+        .card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(15px);
+            width: 400px;
+            height: 420px;         /* SAME SIZE FIX */
+            padding: 10px;
+            border-radius: 15px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+
+        input[type="file"] {
+            margin: 10px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+        }
+
+        button {
+            background: linear-gradient(90deg, #0b9a2c, #16c172);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 60%;
+          display: block;
+    margin: 10px auto; 
+        }
+
+        button:hover {
+            transform: scale(1.03);
+        }
+
+        img {
+            width: 100%;
+            border-radius: 12px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        /* IMAGE INSIDE RESULT CARD */
+        .result-img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #811f06;
+            border-radius: 50%;
+            width: 35px;
+            height: 35px;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .result-box {
+            margin-top: 10px;
+            background: rgba(255,255,255,0.15);
+            padding: 10px;
+            border-radius: 10px;
+            text-align: left;
+            flex-grow: 1;
+        }
+
+        .label {
+            font-weight: bold;
+            margin: 5px 0;
+        }
+
+        .fresh { color: #00ff9d; }
+        .medium { color: #ffcc00; }
+        .rotten { color: #ff4d4d; }
+
+        .footer {
+            position: absolute;
+            bottom: 5px;
+            width: 100%;
+            font-size: 12px;
+            color: #ddd;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>🍇 FruitiePy</h1>
+<div class="subtitle">Smart Fruit Shelf Life Prediction System</div>
+
+<form method="POST" enctype="multipart/form-data" onsubmit="showLoader()">
+
+<div class="main-container">
+
+    <!-- UPLOAD CARD -->
+    <div class="card">
+        <h3>Upload Fruit Image</h3>
+
+        <input type="file" name="image" required onchange="previewImage(event)">
+
+        <img id="preview">
+
+        <br>
+
+        <button type="submit">Analyze Fruit</button>
+
+        <div class="loader" id="loader"></div>
+    </div>
+
+<!-- RESULT CARD -->
+<div class="card">
+
+    <h3>AI Result Dashboard</h3>
+
+    {% if result %}
+
+    <div style="display:flex; gap:12px; align-items:center; height:100%;">
+
+        <!-- IMAGE -->
+        {% if image %}
+        <img src="data:image/jpeg;base64,{{ image }}"
+             style="
+                width:45%;
+                height:220px;
+                object-fit:cover;
+                border-radius:12px;
+                display:block;
+             ">
+        {% endif %}
+
+        <!-- RESULT -->
+        <div class="result-box"
+             style="width:55%; height:220px; display:flex; flex-direction:column; justify-content:center;">
+
+            <div class="label">🕒 Shelf Life:</div>
+            <div>{{ result.prediction }} days</div>
+
+            <br>
+
+            <div class="label">🍃 Condition:</div>
+            <div class="{% if 'Fresh' in result.label %}fresh{% elif 'Medium' in result.label %}medium{% else %}rotten{% endif %}">
+                {{ result.label }}
+            </div>
+
+            <br>
+
+            <div class="label">📊 Confidence:</div>
+            <div>{{ result.confidence }}%</div>
+
+        </div>
+
+    </div>
+
+    {% else %}
+        <p style="font-size:13px;">Upload image to see result</p>
+    {% endif %}
+
+</div>
+
+</div>
+
+</form>
+
+<div class="footer">
+    • FruitiePy 
+</div>
+
+<script>
+function previewImage(event) {
+    var reader = new FileReader();
+    reader.onload = function(){
+        var output = document.getElementById('preview');
+        output.src = reader.result;
+        output.style.display = "block";
+    };
+    reader.readAsDataURL(event.target.files[0]);
+}
+
+function showLoader() {
+    document.getElementById("loader").style.display = "block";
+}
+</script>
+
+</body>
+</html>
