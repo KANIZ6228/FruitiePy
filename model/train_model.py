@@ -43,6 +43,7 @@ from tensorflow.keras.callbacks import (
     ReduceLROnPlateau,
     ModelCheckpoint
 )
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
 # =========================
 # CONFIG
@@ -65,7 +66,7 @@ FRUIT_SHELF_LIFE = {
     # fruit_name : { condition: days }
     "banana":     {"fresh": 6,  "medium": 3,  "rotten": 0},
     "mango":      {"fresh": 7,  "medium": 3,  "rotten": 0},
-    "apple":      {"fresh": 14, "medium": 7,  "rotten": 0},
+    "apple":      {"fresh": 10, "medium": 7,  "rotten": 0},
     "orange":     {"fresh": 14, "medium": 6,  "rotten": 0},
     "strawberry": {"fresh": 4,  "medium": 2,  "rotten": 0},
     "grape":      {"fresh": 7,  "medium": 3,  "rotten": 0},
@@ -74,7 +75,7 @@ FRUIT_SHELF_LIFE = {
     "papaya":     {"fresh": 5,  "medium": 2,  "rotten": 0},
     "pear":       {"fresh": 7,  "medium": 3,  "rotten": 0},
     "peach":      {"fresh": 5,  "medium": 2,  "rotten": 0},
-    "lemon":      {"fresh": 21, "medium": 10, "rotten": 0},
+    "lemon":      {"fresh": 11, "medium": 10, "rotten": 0},
     "kiwi":       {"fresh": 7,  "medium": 3,  "rotten": 0},
     "cherry":     {"fresh": 5,  "medium": 2,  "rotten": 0},
     "plum":       {"fresh": 5,  "medium": 2,  "rotten": 0},
@@ -87,7 +88,9 @@ FRUIT_SHELF_LIFE = {
 # DATA AUGMENTATION
 # =========================
 def augment_image(img):
-    """Apply random augmentations to a single image (numpy array, 0-1 range)."""
+    """Apply random augmentations to a single image (numpy array, 0-255 range)."""
+    img = img.astype(np.float32) / 255.0
+
     # Random horizontal flip
     if np.random.rand() > 0.5:
         img = np.fliplr(img)
@@ -110,7 +113,7 @@ def augment_image(img):
     img  = img[top:top+zh, left:left+zw]
     img  = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
 
-    return img
+    return (img * 255.0).astype(np.float32)
 
 # =========================
 # DATASET LOADER
@@ -144,11 +147,12 @@ def load_dataset(dataset_path):
                 if img is None:
                     continue
                 img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-                img = img / 255.0
-                data.append(img)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = img.astype(np.float32)
+                data.append(preprocess_input(img))
                 labels.append(float(days))
                 # Augment each image once
-                data.append(augment_image(img))
+                data.append(preprocess_input(augment_image(img)))
                 labels.append(float(days))
                 count += 1
             print(f"  [{condition}] → {days} days | {count} images loaded (+ {count} augmented)")
@@ -169,16 +173,17 @@ def load_dataset(dataset_path):
                 for img_name in os.listdir(condition_path):
                     img_path = os.path.join(condition_path, img_name)
                     img = cv2.imread(img_path)
-                    if img is None:
-                        continue
-                    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-                    img = img / 255.0
-                    data.append(img)
-                    labels.append(float(days))
-                    # Augment each image once
-                    data.append(augment_image(img))
-                    labels.append(float(days))
-                    count += 1
+                if img is None:
+                    continue
+                img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = img.astype(np.float32)
+                data.append(preprocess_input(img))
+                labels.append(float(days))
+                # Augment each image once
+                data.append(preprocess_input(augment_image(img)))
+                labels.append(float(days))
+                count += 1
                 print(f"  [{fruit_name}/{condition}] → {days} days | {count} images (+ {count} augmented)")
 
     return np.array(data, dtype=np.float32), np.array(labels, dtype=np.float32)

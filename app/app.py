@@ -37,14 +37,16 @@ fruit_detector = MobileNetV2(weights='imagenet')
 # =========================
 def preprocess(img):
     img = cv2.resize(img, (224, 224))
-    img = img / 255.0
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = img.astype(np.float32)
+    img = preprocess_input(img)
     return np.expand_dims(img, axis=0)
 
 # =========================
 # LABEL FUNCTION
 # =========================
 def get_label(days):
-    if days >= 5:
+    if days >= 3:
         return "Fresh 😀"
     elif days >= 2:
         return "Medium 😥"
@@ -64,6 +66,7 @@ def encode_image(img):
 def is_fruit(img):
 
     resized = cv2.resize(img, (224, 224))
+    resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     x = np.expand_dims(resized, axis=0)
     x = preprocess_input(x)
 
@@ -72,7 +75,7 @@ def is_fruit(img):
 
     fruit_keywords = [
         'banana', 'apple', 'orange', 'pineapple', 'lemon',
-        'mango', 'grape', 'strawberry', 'watermelon',
+        'mango', 'grape', 'strawberry', 'watermelon','pear', 'kiwi', 'coconut', 'avocado', 'papaya', 'peach',
         'papaya', 'pear', 'peach', 'plum', 'cherry',
         'pomegranate', 'fig', 'jackfruit', 'custard_apple'
     ]
