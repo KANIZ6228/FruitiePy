@@ -1,37 +1,4 @@
-"""
-train_model.py — Improved FruitiePy Training Script
 
-Key improvements over original:
-- Realistic shelf life labels (per fruit type, per condition)
-- Data augmentation to improve generalization
-- Dropout regularization to prevent overfitting
-- Two-phase training: frozen base → fine-tuning top layers
-- More epochs with early stopping & learning rate reduction
-- Saves best model automatically (not just last epoch)
-- Prints dataset summary before training
-
-Expected dataset folder structure:
-    ../dataset/
-        banana/
-            fresh/      ← banana images that are fresh
-            medium/
-            rotten/
-        mango/
-            fresh/
-            medium/
-            rotten/
-        apple/
-            fresh/
-            medium/
-            rotten/
-        ... (any fruit folder name works)
-
-    OR flat structure (original):
-    ../dataset/
-        fresh/
-        medium/
-        rotten/
-"""
 
 import os
 import numpy as np
