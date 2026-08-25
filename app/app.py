@@ -269,22 +269,25 @@ def index():
         # -------------------------------------------------
         # DISPLAY LABEL
         # -------------------------------------------------
-
         if predicted_class == "fresh":
 
             label = "Fresh 😀"
+            shelf_life = "2–3 days"
 
         elif predicted_class == "medium":
 
             label = "Medium 😥"
+            shelf_life = "1–2 days"
 
         elif predicted_class == "rotten":
 
             label = "Rotten ❌"
+            shelf_life = "0 days"
 
         else:
 
             label = predicted_class.capitalize()
+            shelf_life = "Unknown"
 
         # -------------------------------------------------
         # RESULT
@@ -296,12 +299,13 @@ def index():
 
             "label": label,
 
+            "shelf_life": shelf_life,
+
             "confidence": round(
                 confidence,
                 2
             )
         }
-
         # -------------------------------------------------
         # DEBUG INFORMATION
         # -------------------------------------------------
