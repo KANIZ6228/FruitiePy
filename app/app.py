@@ -45,12 +45,12 @@ def preprocess(img):
 # =========================
 # LABEL FUNCTION
 # =========================
-def get_label(days):
-    if days >= 2:
-        return "Fresh 😀"
-    elif days >= 5:
-        return "Medium 😥"
-    else:
+def get_label(days): 
+    if days >= 2: 
+        return "Fresh 😀" 
+    elif days >= 5: 
+        return "Medium 😥" 
+    else: 
         return "Rotten ❌"
 
 # =========================
