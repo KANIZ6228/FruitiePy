@@ -5,13 +5,16 @@ import numpy as np
 import cv2
 import os
 import base64
+import json
 
 from tensorflow.keras.applications.mobilenet_v2 import (
-    MobileNetV2,
-    preprocess_input,
-    decode_predictions
+    preprocess_input
 )
 
+
+# =========================================================
+# FLASK APP
+# =========================================================
 
 app = Flask(__name__)
 
@@ -33,17 +36,58 @@ MODEL_PATH = os.path.normpath(
     )
 )
 
+CLASS_NAMES_PATH = os.path.normpath(
+    os.path.join(
+        BASE_DIR,
+        "..",
+        "model",
+        "class_names.json"
+    )
+)
+
+
 # =========================================================
 # LOAD MODEL
 # =========================================================
+
+print("\n[INFO] Loading freshness model...")
 
 model = tf.keras.models.load_model(
     MODEL_PATH,
     compile=False
 )
 
+print("[INFO] Model loaded successfully.")
 
-fruit_detector = MobileNetV2(weights="imagenet")
+
+# =========================================================
+# LOAD CLASS NAMES
+# =========================================================
+
+if os.path.exists(
+    CLASS_NAMES_PATH
+):
+
+    with open(
+        CLASS_NAMES_PATH,
+        "r"
+    ) as f:
+
+        CLASS_NAMES = json.load(f)
+
+else:
+
+    # Fallback
+    CLASS_NAMES = [
+        "fresh",
+        "medium",
+        "rotten"
+    ]
+
+
+print(
+    f"[INFO] Classes: {CLASS_NAMES}"
+)
 
 
 # =========================================================
@@ -52,56 +96,35 @@ fruit_detector = MobileNetV2(weights="imagenet")
 
 def preprocess_image(img):
 
+    # Resize
     img = cv2.resize(
         img,
         (224, 224)
     )
 
+    # OpenCV BGR -> RGB
     img = cv2.cvtColor(
         img,
         cv2.COLOR_BGR2RGB
     )
 
+    # Convert to float
     img = img.astype(
         np.float32
     )
 
+    # MobileNetV2 preprocessing
     img = preprocess_input(
         img
     )
 
-    return np.expand_dims(
+    # Add batch dimension
+    img = np.expand_dims(
         img,
         axis=0
     )
 
-
-def get_condition(days):
-
-    if days >= 2:
-        return "Fresh 😀"
-    if days >= 1:
-        return "Medium 😥"
-    return "Rotten ❌"
-
-
-def is_fruit(img):
-
-    processed = preprocess_image(img)
-    predictions = fruit_detector.predict(processed, verbose=0)
-    decoded = decode_predictions(predictions, top=5)[0]
-
-    fruit_keywords = {
-        "apple", "banana", "orange", "pineapple", "lemon", "mango",
-        "grape", "strawberry", "watermelon", "papaya", "pear", "peach",
-        "plum", "cherry", "pomegranate", "fig", "kiwi", "coconut",
-        "avocado"
-    }
-
-    return any(
-        label.lower() in fruit_keywords
-        for _, label, _ in decoded
-    )
+    return img
 
 
 # =========================================================
@@ -110,10 +133,13 @@ def is_fruit(img):
 
 def encode_image(img):
 
-    _, buffer = cv2.imencode(
+    success, buffer = cv2.imencode(
         ".jpg",
         img
     )
+
+    if not success:
+        return None
 
     return base64.b64encode(
         buffer
@@ -124,24 +150,37 @@ def encode_image(img):
 # PREDICTION
 # =========================================================
 
-def predict_shelf_life(img):
-
-    if not is_fruit(img):
-        return None
+def predict_freshness(img):
 
     processed = preprocess_image(
         img
     )
 
-    days = model.predict(
+    # Model prediction
+    predictions = model.predict(
         processed,
         verbose=0
-    )[0][0]
+    )[0]
 
-    days = max(0.0, float(days))
-    confidence = max(0.0, 100.0 - abs(days - round(days)) * 20.0)
+    # Get highest probability
+    predicted_index = int(
+        np.argmax(predictions)
+    )
 
-    return days, confidence
+    confidence = float(
+        predictions[predicted_index]
+    ) * 100
+
+    # Get class name
+    predicted_class = CLASS_NAMES[
+        predicted_index
+    ]
+
+    return (
+        predicted_class,
+        confidence,
+        predictions
+    )
 
 
 # =========================================================
@@ -155,10 +194,13 @@ def predict_shelf_life(img):
 def index():
 
     result = None
-
     image_data = None
 
     if request.method == "POST":
+
+        # -------------------------------------------------
+        # GET FILE
+        # -------------------------------------------------
 
         file = request.files.get(
             "image"
@@ -167,6 +209,7 @@ def index():
         if not file:
 
             result = {
+                "prediction": "N/A",
                 "label": "No image uploaded",
                 "confidence": 0
             }
@@ -192,6 +235,7 @@ def index():
         if img is None:
 
             result = {
+                "prediction": "N/A",
                 "label": "Invalid image",
                 "confidence": 0
             }
@@ -203,7 +247,7 @@ def index():
             )
 
         # -------------------------------------------------
-        # IMAGE FOR FRONTEND
+        # ENCODE IMAGE FOR FRONTEND
         # -------------------------------------------------
 
         image_data = encode_image(
@@ -214,25 +258,33 @@ def index():
         # PREDICTION
         # -------------------------------------------------
 
-        prediction = predict_shelf_life(
+        (
+            predicted_class,
+            confidence,
+            probabilities
+        ) = predict_freshness(
             img
         )
 
-        if prediction is None:
-            result = {
-                "prediction": "N/A",
-                "label": "❌ Not a Fruit",
-                "confidence": 0
-            }
+        # -------------------------------------------------
+        # DISPLAY LABEL
+        # -------------------------------------------------
 
-            return render_template(
-                "index.html",
-                result=result,
-                image=image_data
-            )
+        if predicted_class == "fresh":
 
-        days, confidence = prediction
-        label = get_condition(days)
+            label = "Fresh 😀"
+
+        elif predicted_class == "medium":
+
+            label = "Medium 😥"
+
+        elif predicted_class == "rotten":
+
+            label = "Rotten ❌"
+
+        else:
+
+            label = predicted_class.capitalize()
 
         # -------------------------------------------------
         # RESULT
@@ -240,7 +292,7 @@ def index():
 
         result = {
 
-            "prediction": round(days, 2),
+            "prediction": predicted_class.capitalize(),
 
             "label": label,
 
@@ -249,6 +301,34 @@ def index():
                 2
             )
         }
+
+        # -------------------------------------------------
+        # DEBUG INFORMATION
+        # -------------------------------------------------
+
+        print("\n" + "=" * 50)
+        print("PREDICTION")
+        print("=" * 50)
+
+        print(
+            f"Fresh  : {probabilities[0] * 100:.2f}%"
+        )
+
+        print(
+            f"Medium : {probabilities[1] * 100:.2f}%"
+        )
+
+        print(
+            f"Rotten : {probabilities[2] * 100:.2f}%"
+        )
+
+        print(
+            f"\nResult: {label}"
+        )
+
+        print(
+            f"Confidence: {confidence:.2f}%"
+        )
 
     return render_template(
         "index.html",
