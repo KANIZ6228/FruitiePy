@@ -138,7 +138,8 @@ FruitiePy/
 │   └── static/
 │
 ├── model/
-│   └── fruit_model.h5
+│   ├── fruit_model.h5
+│   └── best_fruit_model.h5
 │
 ├── dataset/
 │   ├── fruit_name/
@@ -153,6 +154,8 @@ FruitiePy/
 │
 └── README.md
 ```
+
+The app loads `model/fruit_model.h5` by default and falls back to `model/best_fruit_model.h5` when the final model is unavailable.
 
 ---
 

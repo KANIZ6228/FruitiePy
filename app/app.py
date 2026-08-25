@@ -36,6 +36,16 @@ MODEL_PATH = os.path.normpath(
     )
 )
 
+if not os.path.exists(MODEL_PATH):
+    MODEL_PATH = os.path.normpath(
+        os.path.join(
+            BASE_DIR,
+            "..",
+            "model",
+            "best_fruit_model.h5"
+        )
+    )
+
 CLASS_NAMES_PATH = os.path.normpath(
     os.path.join(
         BASE_DIR,
