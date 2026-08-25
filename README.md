@@ -27,6 +27,25 @@ The saved `model/fruit_model.h5` is a regression model with one numeric output: 
 
 
 **[▶️ Watch Demo](https://youtu.be/5MN8IquZOng)**
+
+# 🖥️ Screenshots
+
+## 1. Fresh fruit detection
+
+![Dashboard](screenshots/medium.png)
+
+
+## 2. Medium fruit detection
+
+![Dashboard](screenshots/fresh.png)
+---
+## 3. Rotten fruit detection
+
+![Dashboard](screenshots/rotten.png)
+
+
+
+
 ## 🚀 Features
 
 ✅ Upload fruit images through a web interface
@@ -251,6 +270,8 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+The training script also requires `scikit-learn`, which is included in `requirements.txt`. Python standard-library modules such as `os`, `json`, and `base64` do not need separate installation.
 
 ---
 
