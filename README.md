@@ -32,16 +32,16 @@ The saved `model/fruit_model.h5` is a regression model with one numeric output: 
 
 ## 1. Fresh fruit detection
 
-![Dashboard](screenshots/medium.png)
+![Fresh fruit detection](screenshots/fresh.png)
 
 
 ## 2. Medium fruit detection
 
-![Dashboard](screenshots/fresh.png)
+![Medium fruit detection](screenshots/medium.png)
 ---
 ## 3. Rotten fruit detection
 
-![Dashboard](screenshots/rotten.png)
+![Rotten fruit detection](screenshots/rotten.png)
 
 
 
