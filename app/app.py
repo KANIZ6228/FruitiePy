@@ -1,153 +1,273 @@
 from flask import Flask, request, render_template
+
 import tensorflow as tf
 import numpy as np
 import cv2
 import os
+import json
 import base64
 
-from tensorflow.keras.applications.mobilenet_v2 import (
-    MobileNetV2,
-    preprocess_input,
-    decode_predictions
-)
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+
 
 app = Flask(__name__)
 
-# =========================
-# MODEL PATH
-# =========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-MODEL_PATH = os.path.normpath(
-    os.path.join(BASE_DIR, "..", "model", "fruit_model.h5")
+# =========================================================
+# PATHS
+# =========================================================
+
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
 )
 
-# =========================
-# LOAD MODELS
-# =========================
+MODEL_PATH = os.path.normpath(
+    os.path.join(
+        BASE_DIR,
+        "..",
+        "model",
+        "fruit_model.h5"
+    )
+)
 
-# Shelf life model
-model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+CLASS_NAMES_PATH = os.path.normpath(
+    os.path.join(
+        BASE_DIR,
+        "..",
+        "model",
+        "class_names.json"
+    )
+)
 
-# Fruit detection model (ImageNet pretrained)
-fruit_detector = MobileNetV2(weights='imagenet')
 
-# =========================
+# =========================================================
+# LOAD MODEL
+# =========================================================
+
+model = tf.keras.models.load_model(
+    MODEL_PATH,
+    compile=False
+)
+
+
+# =========================================================
+# LOAD CLASS NAMES
+# =========================================================
+
+with open(
+    CLASS_NAMES_PATH,
+    "r"
+) as f:
+
+    class_names = json.load(f)
+
+
+print(
+    "[INFO] Loaded classes:"
+)
+
+print(class_names)
+
+
+# =========================================================
 # PREPROCESS IMAGE
-# =========================
-def preprocess(img):
-    img = cv2.resize(img, (224, 224))
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.astype(np.float32)
-    img = preprocess_input(img)
-    return np.expand_dims(img, axis=0)
+# =========================================================
 
-# =========================
-# LABEL FUNCTION
-# =========================
-def get_label(days): 
-    if days >= 2: 
-        return "Fresh 😀" 
-    elif days >= 5: 
-        return "Medium 😥" 
-    else: 
-        return "Rotten ❌"
+def preprocess_image(img):
 
-# =========================
-# ENCODE IMAGE FOR FRONTEND
-# =========================
+    img = cv2.resize(
+        img,
+        (224, 224)
+    )
+
+    img = cv2.cvtColor(
+        img,
+        cv2.COLOR_BGR2RGB
+    )
+
+    img = img.astype(
+        np.float32
+    )
+
+    img = preprocess_input(
+        img
+    )
+
+    return np.expand_dims(
+        img,
+        axis=0
+    )
+
+
+# =========================================================
+# ENCODE IMAGE
+# =========================================================
+
 def encode_image(img):
-    _, buffer = cv2.imencode('.jpg', img)
-    return base64.b64encode(buffer).decode('utf-8')
 
-# =========================
-# FRUIT DETECTION (FIXED)
-# =========================
-def is_fruit(img):
+    _, buffer = cv2.imencode(
+        ".jpg",
+        img
+    )
 
-    resized = cv2.resize(img, (224, 224))
-    resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    x = np.expand_dims(resized, axis=0)
-    x = preprocess_input(x)
+    return base64.b64encode(
+        buffer
+    ).decode("utf-8")
 
-    predictions = fruit_detector.predict(x)
-    decoded = decode_predictions(predictions, top=5)[0]
 
-    fruit_keywords = [
-        'banana', 'apple', 'orange', 'pineapple', 'lemon',
-        'mango', 'grape', 'strawberry', 'watermelon','pear', 'kiwi', 'coconut', 'avocado', 'papaya', 'peach',
-        'papaya', 'pear', 'peach', 'plum', 'cherry',
-        'pomegranate', 'fig', 'jackfruit', 'custard_apple'
+# =========================================================
+# PREDICTION
+# =========================================================
+
+def predict_fruit(img):
+
+    processed = preprocess_image(
+        img
+    )
+
+    predictions = model.predict(
+        processed,
+        verbose=0
+    )[0]
+
+    predicted_index = np.argmax(
+        predictions
+    )
+
+    confidence = (
+        predictions[predicted_index]
+        * 100
+    )
+
+    predicted_class = class_names[
+        predicted_index
     ]
 
-    # Simple reliable check
-    for _, label, _ in decoded:
-        label = label.lower()
+    # Example:
+    # banana_fresh
 
-        for fruit in fruit_keywords:
-            if fruit in label:
-                return True
+    parts = predicted_class.split(
+        "_"
+    )
 
-    return False
+    condition = parts[-1]
 
-# =========================
+    fruit = "_".join(
+        parts[:-1]
+    )
+
+    return (
+        fruit,
+        condition,
+        float(confidence)
+    )
+
+
+# =========================================================
 # MAIN ROUTE
-# =========================
-@app.route('/', methods=['GET', 'POST'])
+# =========================================================
+
+@app.route(
+    "/",
+    methods=["GET", "POST"]
+)
 def index():
 
     result = None
+
     image_data = None
 
-    if request.method == 'POST':
+    if request.method == "POST":
 
-        file = request.files['image']
-
-        # Read image
-        img = cv2.imdecode(
-            np.frombuffer(file.read(), np.uint8),
-            cv2.IMREAD_COLOR
+        file = request.files.get(
+            "image"
         )
 
-        # Encode image for UI
-        image_data = encode_image(img)
-
-        # =========================
-        # CHECK IF FRUIT
-        # =========================
-        if not is_fruit(img):
+        if not file:
 
             result = {
-                "prediction": "N/A",
-                "label": "❌ Not a Fruit",
+                "label": "No image uploaded",
                 "confidence": 0
             }
 
             return render_template(
                 "index.html",
                 result=result,
-                image=image_data
+                image=None
             )
 
-        # =========================
-        # PREDICTION
-        # =========================
-        processed = preprocess(img)
+        # -------------------------------------------------
+        # READ IMAGE
+        # -------------------------------------------------
 
-        prediction = model.predict(processed)[0][0]
-        prediction = max(0, prediction)
-
-        label = get_label(prediction)
-
-        confidence = max(
-            0,
-            100 - abs(prediction - round(prediction)) * 20
+        img = cv2.imdecode(
+            np.frombuffer(
+                file.read(),
+                np.uint8
+            ),
+            cv2.IMREAD_COLOR
         )
 
+        if img is None:
+
+            result = {
+                "label": "Invalid image",
+                "confidence": 0
+            }
+
+            return render_template(
+                "index.html",
+                result=result,
+                image=None
+            )
+
+        # -------------------------------------------------
+        # IMAGE FOR FRONTEND
+        # -------------------------------------------------
+
+        image_data = encode_image(
+            img
+        )
+
+        # -------------------------------------------------
+        # PREDICTION
+        # -------------------------------------------------
+
+        fruit, condition, confidence = predict_fruit(
+            img
+        )
+
+        # -------------------------------------------------
+        # FORMAT LABEL
+        # -------------------------------------------------
+
+        condition_display = {
+            "fresh": "Fresh 😀",
+            "medium": "Medium 😥",
+            "rotten": "Rotten ❌"
+        }
+
+        label = condition_display.get(
+            condition,
+            condition.capitalize()
+        )
+
+        # -------------------------------------------------
+        # RESULT
+        # -------------------------------------------------
+
         result = {
-            "prediction": round(prediction, 2),
+
+            "fruit": fruit.capitalize(),
+
+            "prediction": label,
+
             "label": label,
-            "confidence": round(confidence, 1)
+
+            "confidence": round(
+                confidence,
+                2
+            )
         }
 
     return render_template(
@@ -156,8 +276,13 @@ def index():
         image=image_data
     )
 
-# =========================
-# RUN APP
-# =========================
+
+# =========================================================
+# RUN
+# =========================================================
+
 if __name__ == "__main__":
-    app.run(debug=True)
+
+    app.run(
+        debug=True
+    )

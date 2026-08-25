@@ -1,328 +1,442 @@
-"""
-train_model.py — Improved FruitiePy Training Script
-
-Key improvements over original:
-- Realistic shelf life labels (per fruit type, per condition)
-- Data augmentation to improve generalization
-- Dropout regularization to prevent overfitting
-- Two-phase training: frozen base → fine-tuning top layers
-- More epochs with early stopping & learning rate reduction
-- Saves best model automatically (not just last epoch)
-- Prints dataset summary before training
-
-Expected dataset folder structure:
-    ../dataset/
-        banana/
-            fresh/      ← banana images that are fresh
-            medium/
-            rotten/
-        mango/
-            fresh/
-            medium/
-            rotten/
-        apple/
-            fresh/
-            medium/
-            rotten/
-        ... (any fruit folder name works)
-
-    OR flat structure (original):
-    ../dataset/
-        fresh/
-        medium/
-        rotten/
-"""
-
 import os
-import numpy as np
+import json
 import cv2
+import numpy as np
 import tensorflow as tf
+
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.callbacks import (
     EarlyStopping,
     ReduceLROnPlateau,
     ModelCheckpoint
 )
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
-# =========================
+# =========================================================
 # CONFIG
-# =========================
-IMG_SIZE      = 224
-BATCH_SIZE    = 32
-EPOCHS_PHASE1 = 15   # frozen base
-EPOCHS_PHASE2 = 15   # fine-tune top layers
-TEST_SIZE     = 0.2
-RANDOM_STATE  = 42
+# =========================================================
+
+IMG_SIZE = 224
+BATCH_SIZE = 32
+EPOCHS_PHASE1 = 15
+EPOCHS_PHASE2 = 15
+
+TEST_SIZE = 0.2
+RANDOM_STATE = 42
+
+DATASET_PATH = "../dataset"
 MODEL_SAVE_PATH = "fruit_model.h5"
-DATASET_PATH    = "../dataset"
+CLASS_NAMES_PATH = "class_names.json"
 
-# =========================
-# REALISTIC SHELF LIFE MAP
-# Per-fruit, per-condition (days remaining)
-# Based on general produce science estimates
-# =========================
-FRUIT_SHELF_LIFE = {
-    # fruit_name : { condition: days }
-    "banana":     {"fresh": 6,  "medium": 3,  "rotten": 0},
-    "mango":      {"fresh": 7,  "medium": 3,  "rotten": 0},
-    "apple":      {"fresh": 10, "medium": 7,  "rotten": 0},
-    "orange":     {"fresh": 14, "medium": 6,  "rotten": 0},
-    "strawberry": {"fresh": 4,  "medium": 2,  "rotten": 0},
-    "grape":      {"fresh": 7,  "medium": 3,  "rotten": 0},
-    "watermelon": {"fresh": 7,  "medium": 3,  "rotten": 0},
-    "pineapple":  {"fresh": 5,  "medium": 2,  "rotten": 0},
-    "papaya":     {"fresh": 5,  "medium": 2,  "rotten": 0},
-    "pear":       {"fresh": 7,  "medium": 3,  "rotten": 0},
-    "peach":      {"fresh": 5,  "medium": 2,  "rotten": 0},
-    "lemon":      {"fresh": 11, "medium": 10, "rotten": 0},
-    "kiwi":       {"fresh": 7,  "medium": 3,  "rotten": 0},
-    "cherry":     {"fresh": 5,  "medium": 2,  "rotten": 0},
-    "plum":       {"fresh": 5,  "medium": 2,  "rotten": 0},
-    "pomegranate":{"fresh": 14, "medium": 6,  "rotten": 0},
-    # Default fallback for unknown/flat dataset structure
-    "default":    {"fresh": 7,  "medium": 3,  "rotten": 0},
-}
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATASET_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "dataset"))
+MODEL_SAVE_PATH = os.path.join(BASE_DIR, "fruit_model.h5")
+CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
 
-# =========================
-# DATA AUGMENTATION
-# =========================
-def augment_image(img):
-    """Apply random augmentations to a single image (numpy array, 0-255 range)."""
-    img = img.astype(np.float32) / 255.0
 
-    # Random horizontal flip
-    if np.random.rand() > 0.5:
-        img = np.fliplr(img)
+# =========================================================
+# LOAD DATASET
+# =========================================================
 
-    # Random brightness adjustment
-    factor = np.random.uniform(0.7, 1.3)
-    img = np.clip(img * factor, 0, 1)
-
-    # Random rotation (±15 degrees)
-    angle = np.random.uniform(-15, 15)
-    h, w = img.shape[:2]
-    M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
-    img = cv2.warpAffine((img * 255).astype(np.uint8), M, (w, h)) / 255.0
-
-    # Random zoom (crop center 85-100% then resize back)
-    zoom = np.random.uniform(0.85, 1.0)
-    zh, zw = int(h * zoom), int(w * zoom)
-    top  = (h - zh) // 2
-    left = (w - zw) // 2
-    img  = img[top:top+zh, left:left+zw]
-    img  = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-
-    return (img * 255.0).astype(np.float32)
-
-# =========================
-# DATASET LOADER
-# =========================
 def load_dataset(dataset_path):
-    """
-    Supports two folder structures:
-      1. Flat:    dataset/fresh/, dataset/medium/, dataset/rotten/
-      2. Per-fruit: dataset/mango/fresh/, dataset/apple/rotten/, etc.
-    """
-    data   = []
+
+    data = []
     labels = []
-    conditions_found = {"fresh", "medium", "rotten"}
 
-    top_level = os.listdir(dataset_path)
+    class_names = []
 
-    # Detect structure
-    is_flat = any(d in conditions_found for d in top_level)
+    print("\n[INFO] Loading dataset...")
 
-    if is_flat:
-        print("[INFO] Detected FLAT dataset structure (fresh/medium/rotten at root)")
-        for condition in conditions_found:
-            condition_path = os.path.join(dataset_path, condition)
+    for fruit_name in sorted(os.listdir(dataset_path)):
+
+        fruit_path = os.path.join(dataset_path, fruit_name)
+
+        if not os.path.isdir(fruit_path):
+            continue
+
+        for condition in ["fresh", "medium", "rotten"]:
+
+            condition_path = os.path.join(
+                fruit_path,
+                condition
+            )
+
             if not os.path.isdir(condition_path):
                 continue
-            days = FRUIT_SHELF_LIFE["default"][condition]
+
+            class_name = f"{fruit_name}_{condition}"
+
+            if class_name not in class_names:
+                class_names.append(class_name)
+
+            class_index = class_names.index(class_name)
+
             count = 0
+
             for img_name in os.listdir(condition_path):
-                img_path = os.path.join(condition_path, img_name)
+
+                img_path = os.path.join(
+                    condition_path,
+                    img_name
+                )
+
                 img = cv2.imread(img_path)
+
                 if img is None:
                     continue
-                img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+                img = cv2.resize(
+                    img,
+                    (IMG_SIZE, IMG_SIZE)
+                )
+
+                img = cv2.cvtColor(
+                    img,
+                    cv2.COLOR_BGR2RGB
+                )
+
                 img = img.astype(np.float32)
-                data.append(preprocess_input(img))
-                labels.append(float(days))
-                # Augment each image once
-                data.append(preprocess_input(augment_image(img)))
-                labels.append(float(days))
+
+                img = preprocess_input(img)
+
+                data.append(img)
+                labels.append(class_index)
+
                 count += 1
-            print(f"  [{condition}] → {days} days | {count} images loaded (+ {count} augmented)")
 
-    else:
-        print("[INFO] Detected PER-FRUIT dataset structure (fruit/condition/)")
-        for fruit_name in top_level:
-            fruit_path = os.path.join(dataset_path, fruit_name)
-            if not os.path.isdir(fruit_path):
-                continue
-            shelf = FRUIT_SHELF_LIFE.get(fruit_name.lower(), FRUIT_SHELF_LIFE["default"])
-            for condition in conditions_found:
-                condition_path = os.path.join(fruit_path, condition)
-                if not os.path.isdir(condition_path):
-                    continue
-                days = shelf[condition]
-                count = 0
-                for img_name in os.listdir(condition_path):
-                    img_path = os.path.join(condition_path, img_name)
-                    img = cv2.imread(img_path)
-                if img is None:
-                    continue
-                img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img = img.astype(np.float32)
-                data.append(preprocess_input(img))
-                labels.append(float(days))
-                # Augment each image once
-                data.append(preprocess_input(augment_image(img)))
-                labels.append(float(days))
-                count += 1
-                print(f"  [{fruit_name}/{condition}] → {days} days | {count} images (+ {count} augmented)")
+            print(
+                f"[{class_name}] "
+                f"{count} images"
+            )
 
-    return np.array(data, dtype=np.float32), np.array(labels, dtype=np.float32)
+    print("\n[INFO] Classes found:")
 
-# =========================
+    for i, class_name in enumerate(class_names):
+        print(f"{i}: {class_name}")
+
+    return (
+        np.array(data, dtype=np.float32),
+        np.array(labels, dtype=np.int32),
+        class_names
+    )
+
+
+# =========================================================
 # BUILD MODEL
-# =========================
-def build_model():
+# =========================================================
+
+def build_model(num_classes):
+
     base_model = tf.keras.applications.MobileNetV2(
         input_shape=(IMG_SIZE, IMG_SIZE, 3),
         include_top=False,
-        weights='imagenet'
+        weights="imagenet"
     )
-    base_model.trainable = False  # Phase 1: frozen
 
-    inputs = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
-    x = base_model(inputs, training=False)
+    base_model.trainable = False
+
+    inputs = tf.keras.Input(
+        shape=(IMG_SIZE, IMG_SIZE, 3)
+    )
+
+    x = base_model(
+        inputs,
+        training=False
+    )
+
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(128, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.3)(x)          # regularization
-    x = tf.keras.layers.Dense(64, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
-    outputs = tf.keras.layers.Dense(1, activation='relu')(x)  # relu ensures >= 0
 
-    model = tf.keras.Model(inputs, outputs)
+    x = tf.keras.layers.Dense(
+        128,
+        activation="relu"
+    )(x)
+
+    x = tf.keras.layers.Dropout(0.3)(x)
+
+    x = tf.keras.layers.Dense(
+        64,
+        activation="relu"
+    )(x)
+
+    x = tf.keras.layers.Dropout(0.2)(x)
+
+    outputs = tf.keras.layers.Dense(
+        num_classes,
+        activation="softmax"
+    )(x)
+
+    model = tf.keras.Model(
+        inputs,
+        outputs
+    )
+
     return model, base_model
 
-# =========================
-# CALLBACKS
-# =========================
-def get_callbacks(phase):
-    return [
+
+# =========================================================
+# DATA AUGMENTATION
+# =========================================================
+
+data_augmentation = tf.keras.Sequential([
+
+    tf.keras.layers.RandomFlip(
+        "horizontal"
+    ),
+
+    tf.keras.layers.RandomRotation(
+        0.1
+    ),
+
+    tf.keras.layers.RandomZoom(
+        0.15
+    ),
+
+    tf.keras.layers.RandomContrast(
+        0.1
+    )
+])
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+
+    print("=" * 60)
+    print("        FruitiePy - Fruit Freshness Classifier")
+    print("=" * 60)
+
+    # -----------------------------------------------------
+    # LOAD DATA
+    # -----------------------------------------------------
+
+    X, y, class_names = load_dataset(
+        DATASET_PATH
+    )
+
+    if len(X) == 0:
+
+        print(
+            "\n[ERROR] No images found."
+        )
+
+        return
+
+    print(
+        f"\n[INFO] Total images: {len(X)}"
+    )
+
+    print(
+        f"[INFO] Number of classes: "
+        f"{len(class_names)}"
+    )
+
+    # -----------------------------------------------------
+    # TRAIN / VALIDATION SPLIT
+    # -----------------------------------------------------
+
+    X_train, X_test, y_train, y_test = train_test_split(
+
+        X,
+        y,
+
+        test_size=TEST_SIZE,
+
+        random_state=RANDOM_STATE,
+
+        stratify=y
+    )
+
+    print(
+        f"\n[INFO] Training images: "
+        f"{len(X_train)}"
+    )
+
+    print(
+        f"[INFO] Validation images: "
+        f"{len(X_test)}"
+    )
+
+    # -----------------------------------------------------
+    # BUILD MODEL
+    # -----------------------------------------------------
+
+    model, base_model = build_model(
+        len(class_names)
+    )
+
+    model.summary()
+
+    # -----------------------------------------------------
+    # PHASE 1
+    # -----------------------------------------------------
+
+    print(
+        "\n[PHASE 1] Training classifier..."
+    )
+
+    model.compile(
+
+        optimizer=tf.keras.optimizers.Adam(
+            learning_rate=1e-3
+        ),
+
+        loss="sparse_categorical_crossentropy",
+
+        metrics=["accuracy"]
+    )
+
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        (X_train, y_train)
+    )
+
+    train_dataset = (
+        train_dataset
+        .shuffle(1000)
+        .batch(BATCH_SIZE)
+        .map(
+            lambda x, y: (
+                data_augmentation(x, training=True),
+                y
+            )
+        )
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
+    validation_dataset = tf.data.Dataset.from_tensor_slices(
+        (X_test, y_test)
+    )
+
+    validation_dataset = (
+        validation_dataset
+        .batch(BATCH_SIZE)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
+    callbacks = [
+
         EarlyStopping(
-            monitor='val_mae',
+            monitor="val_accuracy",
             patience=5,
             restore_best_weights=True,
             verbose=1
         ),
+
         ReduceLROnPlateau(
-            monitor='val_loss',
+            monitor="val_loss",
             factor=0.5,
-            patience=3,
+            patience=2,
             min_lr=1e-6,
             verbose=1
         ),
+
         ModelCheckpoint(
-            filepath=f"best_model_phase{phase}.h5",
-            monitor='val_mae',
+            "best_fruit_model.h5",
+            monitor="val_accuracy",
             save_best_only=True,
             verbose=1
         )
     ]
 
-# =========================
-# MAIN TRAINING
-# =========================
-def main():
-    print("=" * 50)
-    print("  FruitiePy — Model Training")
-    print("=" * 50)
-
-    # Load data
-    print("\n[STEP 1] Loading dataset...")
-    data, labels = load_dataset(DATASET_PATH)
-
-    if len(data) == 0:
-        print("[ERROR] No images found. Check your dataset path and structure.")
-        return
-
-    print(f"\n[INFO] Total samples : {len(data)}")
-    print(f"[INFO] Label range   : {labels.min():.1f} – {labels.max():.1f} days")
-    print(f"[INFO] Label mean    : {labels.mean():.2f} days")
-
-    # Split
-    X_train, X_test, y_train, y_test = train_test_split(
-        data, labels,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE
-    )
-    print(f"[INFO] Train: {len(X_train)} | Test: {len(X_test)}")
-
-    # Build model
-    print("\n[STEP 2] Building model...")
-    model, base_model = build_model()
-    model.summary()
-
-    # -------------------------
-    # PHASE 1: Train top layers
-    # -------------------------
-    print("\n[STEP 3] Phase 1 — Training top layers (base frozen)...")
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
-        loss='huber',        # more robust to outliers than MSE
-        metrics=['mae']
-    )
     model.fit(
-        X_train, y_train,
+
+        train_dataset,
+
+        validation_data=validation_dataset,
+
         epochs=EPOCHS_PHASE1,
-        batch_size=BATCH_SIZE,
-        validation_data=(X_test, y_test),
-        callbacks=get_callbacks(1),
-        verbose=1
+
+        callbacks=callbacks
     )
 
-    # -------------------------
-    # PHASE 2: Fine-tune top layers of base model
-    # -------------------------
-    print("\n[STEP 4] Phase 2 — Fine-tuning top layers of MobileNetV2...")
+    # -----------------------------------------------------
+    # PHASE 2 - FINE TUNING
+    # -----------------------------------------------------
+
+    print(
+        "\n[PHASE 2] Fine-tuning MobileNetV2..."
+    )
+
     base_model.trainable = True
 
-    # Only unfreeze the last 30 layers
     for layer in base_model.layers[:-30]:
+
         layer.trainable = False
 
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),  # lower LR
-        loss='huber',
-        metrics=['mae']
+
+        optimizer=tf.keras.optimizers.Adam(
+            learning_rate=1e-5
+        ),
+
+        loss="sparse_categorical_crossentropy",
+
+        metrics=["accuracy"]
     )
+
     model.fit(
-        X_train, y_train,
+
+        train_dataset,
+
+        validation_data=validation_dataset,
+
         epochs=EPOCHS_PHASE2,
-        batch_size=BATCH_SIZE,
-        validation_data=(X_test, y_test),
-        callbacks=get_callbacks(2),
-        verbose=1
+
+        callbacks=callbacks
     )
 
-    # -------------------------
-    # EVALUATE & SAVE
-    # -------------------------
-    print("\n[STEP 5] Evaluating final model...")
-    loss, mae = model.evaluate(X_test, y_test, verbose=0)
-    print(f"[RESULT] Test Loss (Huber): {loss:.4f}")
-    print(f"[RESULT] Test MAE         : {mae:.4f} days")
+    # -----------------------------------------------------
+    # EVALUATION
+    # -----------------------------------------------------
 
-    model.save(MODEL_SAVE_PATH)
-    print(f"\n✅ Model saved to: {MODEL_SAVE_PATH}")
-    print("=" * 50)
+    print(
+        "\n[STEP] Evaluating model..."
+    )
+
+    loss, accuracy = model.evaluate(
+        validation_dataset
+    )
+
+    print(
+        f"\nValidation Accuracy: "
+        f"{accuracy * 100:.2f}%"
+    )
+
+    # -----------------------------------------------------
+    # SAVE MODEL
+    # -----------------------------------------------------
+
+    model.save(
+        MODEL_SAVE_PATH
+    )
+
+    print(
+        f"\n[INFO] Model saved to: "
+        f"{MODEL_SAVE_PATH}"
+    )
+
+    # -----------------------------------------------------
+    # SAVE CLASS NAMES
+    # -----------------------------------------------------
+
+    with open(
+        CLASS_NAMES_PATH,
+        "w"
+    ) as f:
+
+        json.dump(
+            class_names,
+            f,
+            indent=4
+        )
+
+    print(
+        f"[INFO] Classes saved to: "
+        f"{CLASS_NAMES_PATH}"
+    )
+
+    print("\nTraining completed successfully!")
 
 
 if __name__ == "__main__":
