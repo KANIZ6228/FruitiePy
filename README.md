@@ -18,7 +18,11 @@ The system performs:
 * Web-based visualization dashboard
 
 ---
+### 🎥 Demo Video
 
+
+
+**[▶️ Watch Demo](https://youtu.be/5MN8IquZOng)**
 ## 🚀 Features
 
 ✅ Upload fruit images through a web interface
