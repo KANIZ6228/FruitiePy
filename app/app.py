@@ -4,10 +4,13 @@ import tensorflow as tf
 import numpy as np
 import cv2
 import os
-import json
 import base64
 
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.applications.mobilenet_v2 import (
+    MobileNetV2,
+    preprocess_input,
+    decode_predictions
+)
 
 
 app = Flask(__name__)
@@ -30,16 +33,6 @@ MODEL_PATH = os.path.normpath(
     )
 )
 
-CLASS_NAMES_PATH = os.path.normpath(
-    os.path.join(
-        BASE_DIR,
-        "..",
-        "model",
-        "class_names.json"
-    )
-)
-
-
 # =========================================================
 # LOAD MODEL
 # =========================================================
@@ -50,23 +43,7 @@ model = tf.keras.models.load_model(
 )
 
 
-# =========================================================
-# LOAD CLASS NAMES
-# =========================================================
-
-with open(
-    CLASS_NAMES_PATH,
-    "r"
-) as f:
-
-    class_names = json.load(f)
-
-
-print(
-    "[INFO] Loaded classes:"
-)
-
-print(class_names)
+fruit_detector = MobileNetV2(weights="imagenet")
 
 
 # =========================================================
@@ -99,6 +76,34 @@ def preprocess_image(img):
     )
 
 
+def get_condition(days):
+
+    if days >= 2:
+        return "Fresh 😀"
+    if days >= 1:
+        return "Medium 😥"
+    return "Rotten ❌"
+
+
+def is_fruit(img):
+
+    processed = preprocess_image(img)
+    predictions = fruit_detector.predict(processed, verbose=0)
+    decoded = decode_predictions(predictions, top=5)[0]
+
+    fruit_keywords = {
+        "apple", "banana", "orange", "pineapple", "lemon", "mango",
+        "grape", "strawberry", "watermelon", "papaya", "pear", "peach",
+        "plum", "cherry", "pomegranate", "fig", "kiwi", "coconut",
+        "avocado"
+    }
+
+    return any(
+        label.lower() in fruit_keywords
+        for _, label, _ in decoded
+    )
+
+
 # =========================================================
 # ENCODE IMAGE
 # =========================================================
@@ -119,48 +124,24 @@ def encode_image(img):
 # PREDICTION
 # =========================================================
 
-def predict_fruit(img):
+def predict_shelf_life(img):
+
+    if not is_fruit(img):
+        return None
 
     processed = preprocess_image(
         img
     )
 
-    predictions = model.predict(
+    days = model.predict(
         processed,
         verbose=0
-    )[0]
+    )[0][0]
 
-    predicted_index = np.argmax(
-        predictions
-    )
+    days = max(0.0, float(days))
+    confidence = max(0.0, 100.0 - abs(days - round(days)) * 20.0)
 
-    confidence = (
-        predictions[predicted_index]
-        * 100
-    )
-
-    predicted_class = class_names[
-        predicted_index
-    ]
-
-    # Example:
-    # banana_fresh
-
-    parts = predicted_class.split(
-        "_"
-    )
-
-    condition = parts[-1]
-
-    fruit = "_".join(
-        parts[:-1]
-    )
-
-    return (
-        fruit,
-        condition,
-        float(confidence)
-    )
+    return days, confidence
 
 
 # =========================================================
@@ -233,24 +214,25 @@ def index():
         # PREDICTION
         # -------------------------------------------------
 
-        fruit, condition, confidence = predict_fruit(
+        prediction = predict_shelf_life(
             img
         )
 
-        # -------------------------------------------------
-        # FORMAT LABEL
-        # -------------------------------------------------
+        if prediction is None:
+            result = {
+                "prediction": "N/A",
+                "label": "❌ Not a Fruit",
+                "confidence": 0
+            }
 
-        condition_display = {
-            "fresh": "Fresh 😀",
-            "medium": "Medium 😥",
-            "rotten": "Rotten ❌"
-        }
+            return render_template(
+                "index.html",
+                result=result,
+                image=image_data
+            )
 
-        label = condition_display.get(
-            condition,
-            condition.capitalize()
-        )
+        days, confidence = prediction
+        label = get_condition(days)
 
         # -------------------------------------------------
         # RESULT
@@ -258,9 +240,7 @@ def index():
 
         result = {
 
-            "fruit": fruit.capitalize(),
-
-            "prediction": label,
+            "prediction": round(days, 2),
 
             "label": label,
 

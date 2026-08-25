@@ -17,6 +17,10 @@ The system performs:
 * Freshness classification
 * Web-based visualization dashboard
 
+### Model compatibility
+
+The saved `model/fruit_model.h5` is a regression model with one numeric output: predicted remaining shelf life in days. The Flask app must use numeric regression inference, not class indexes or `class_names.json`. Training and inference use RGB images with MobileNetV2 `preprocess_input` normalization.
+
 ---
 ### 🎥 Demo Video
 
