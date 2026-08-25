@@ -46,9 +46,9 @@ def preprocess(img):
 # LABEL FUNCTION
 # =========================
 def get_label(days):
-    if days >= 3:
+    if days >= 2:
         return "Fresh 😀"
-    elif days >= 2:
+    elif days >= 5:
         return "Medium 😥"
     else:
         return "Rotten ❌"
